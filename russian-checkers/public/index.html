@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Русские Шашки</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Русские Шашки</h1>
+        <div id="status">Ход: Белые</div>
+        <div id="onlineInfo" style="display: none; color: #1abc9c; margin-bottom: 15px;"></div>
+        <div id="board" class="board"></div>
+        <div class="controls">
+            <select id="modeSelect">
+                <option value="pvp">Локально (Игрок vs Игрок)</option>
+                <option value="pvc">Игрок против Компьютера</option>
+                <option value="online">Онлайн (С другом)</option>
+            </select>
+            <button id="restartBtn">Начать заново</button>
+        </div>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
