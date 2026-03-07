@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const Anthropic = require('@anthropic-ai/sdk');
+const OpenAI = require('openai');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,6 +15,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const config = require('./config.json');
 const anthropic = new Anthropic();
+const openai = new OpenAI();
 
 app.post('/api/ai-move', async (req, res) => {
     const { board, validMoves, aiColor = 'black' } = req.body;
@@ -66,6 +68,60 @@ Pick the best move index (0-${validMoves.length - 1}). Respond with ONLY the num
         }
     } catch (err) {
         console.error('Claude API error:', err.message);
+        res.json({ moveIndex: Math.floor(Math.random() * validMoves.length) });
+    }
+});
+
+app.post('/api/chatgpt-move', async (req, res) => {
+    const { board, validMoves, aiColor = 'black' } = req.body;
+    const aiPieces = aiColor === 'white' ? 'white pieces (w/W)' : 'dark pieces (b/B)';
+
+    const boardStr = board.map((row, r) =>
+        row.map((cell, c) => {
+            if (!cell) return (r + c) % 2 !== 0 ? '.' : ' ';
+            let ch = cell.color === 'white' ? 'w' : 'b';
+            if (cell.isKing) ch = ch.toUpperCase();
+            return ch;
+        }).join(' ')
+    ).map((row, i) => `${8 - i} | ${row}`).join('\n');
+
+    const movesStr = validMoves.map((m, i) =>
+        `${i}: (${m.from.r},${m.from.c}) -> (${m.to.r},${m.to.c})${m.to.capture ? ` captures (${m.to.capture.r},${m.to.capture.c})` : ''}`
+    ).join('\n');
+
+    try {
+        const params = {
+            model: config.openai.model,
+            max_completion_tokens: config.openai.maxCompletionTokens,
+            messages: [{
+                role: 'user',
+                content: `You are playing Russian checkers (шашки) as the ${aiPieces}. The board (row,col from top-left, 0-indexed):
+    a b c d e f g h
+${boardStr}
+Legend: w=white man, W=white king, b=dark man, B=dark king, .=empty dark square
+
+Your valid moves:
+${movesStr}
+
+Pick the best move index (0-${validMoves.length - 1}). Respond with ONLY the number, nothing else.`
+            }]
+        };
+
+        if (config.openai.reasoningEffort) {
+            params.reasoning_effort = config.openai.reasoningEffort;
+        }
+
+        const response = await openai.chat.completions.create(params);
+
+        const text = response.choices[0]?.message?.content?.trim() || '0';
+        const moveIndex = parseInt(text, 10);
+        if (isNaN(moveIndex) || moveIndex < 0 || moveIndex >= validMoves.length) {
+            res.json({ moveIndex: 0 });
+        } else {
+            res.json({ moveIndex });
+        }
+    } catch (err) {
+        console.error('OpenAI API error:', err.message);
         res.json({ moveIndex: Math.floor(Math.random() * validMoves.length) });
     }
 });

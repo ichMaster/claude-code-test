@@ -87,12 +87,12 @@ document.addEventListener("DOMContentLoaded", () => {
     let socket = null;
     let myColor = null;
     let roomName = null;
-    let claudeThinking = false;
+    let aiThinking = false;
 
     // ─── Board labels ────────────────────────────────────────────────────────
 
     function isFlipped() {
-        if (gameMode === 'pvc' || gameMode === 'claude') return playerColor === 'black';
+        if (gameMode === 'pvc' || gameMode === 'claude' || gameMode === 'chatgpt') return playerColor === 'black';
         if (gameMode === 'online') return myColor === 'black';
         return false;
     }
@@ -144,10 +144,10 @@ document.addEventListener("DOMContentLoaded", () => {
         lastMoveFrom = null;
         lastMoveTo = null;
 
-        claudeThinking = false;
+        aiThinking = false;
         gameGen++;
 
-        if (gameMode === 'pvc' || gameMode === 'claude') {
+        if (gameMode === 'pvc' || gameMode === 'claude' || gameMode === 'chatgpt') {
             playerColor = playerColor === 'white' ? 'black' : 'white';
             aiColor = playerColor === 'white' ? 'black' : 'white';
         }
@@ -166,11 +166,10 @@ document.addEventListener("DOMContentLoaded", () => {
             updateStatus();
             renderBoard();
             startTimer();
-            if (gameMode === 'pvc' && currentPlayer === aiColor) {
-                setTimeout(makeAIMove, 500);
-            }
-            if (gameMode === 'claude' && currentPlayer === aiColor) {
-                setTimeout(makeClaudeMove, 500);
+            if (currentPlayer === aiColor) {
+                if (gameMode === 'pvc') setTimeout(makeAIMove, 500);
+                else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), 500);
+                else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), 500);
             }
         }
     }
@@ -230,7 +229,7 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 statusElement.textContent = `Хід суперника (${turnLabel})`;
             }
-        } else if (gameMode === 'pvc' || gameMode === 'claude') {
+        } else if (gameMode === 'pvc' || gameMode === 'claude' || gameMode === 'chatgpt') {
             const yourLabel = playerColor === 'white' ? 'Білі' : 'Чорні';
             if (currentPlayer === playerColor) {
                 statusElement.textContent = `Ваш хід (${yourLabel})`;
@@ -304,8 +303,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function handleSquareClick(r, c) {
         if (isGameOver) return;
-        if (gameMode === 'pvc' && currentPlayer !== playerColor) return;
-        if (gameMode === 'claude' && currentPlayer !== playerColor) return;
+        if ((gameMode === 'pvc' || gameMode === 'claude' || gameMode === 'chatgpt') && currentPlayer !== playerColor) return;
         if (gameMode === 'online') {
             if (myColor === 'spectator') return;
             if (currentPlayer !== myColor) return;
@@ -445,11 +443,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     updateStatus();
                     renderBoard();
                     emitMoveOnline();
-                    if (gameMode === 'pvc' && currentPlayer === aiColor && !isGameOver) {
-                        setTimeout(makeAIMove, 500);
-                    }
-                    if (gameMode === 'claude' && currentPlayer === aiColor && !isGameOver) {
-                        setTimeout(makeClaudeMove, 500);
+                    if (currentPlayer === aiColor && !isGameOver) {
+                        if (gameMode === 'pvc') setTimeout(makeAIMove, 500);
+                        else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), 500);
+                        else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), 500);
                     }
                     return; // stay on this player's turn
                 }
@@ -472,11 +469,10 @@ document.addEventListener("DOMContentLoaded", () => {
         renderBoard();
         emitMoveOnline();
 
-        if (gameMode === 'pvc' && currentPlayer === aiColor && !isGameOver) {
-            setTimeout(makeAIMove, 500);
-        }
-        if (gameMode === 'claude' && currentPlayer === aiColor && !isGameOver) {
-            setTimeout(makeClaudeMove, 500);
+        if (currentPlayer === aiColor && !isGameOver) {
+            if (gameMode === 'pvc') setTimeout(makeAIMove, 500);
+            else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), 500);
+            else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), 500);
         }
     }
 
@@ -511,12 +507,13 @@ document.addEventListener("DOMContentLoaded", () => {
     function getScoreLabels() {
         if (gameMode === 'pvc') return { a: 'Ви', b: "Комп'ютер" };
         if (gameMode === 'claude') return { a: 'Ви', b: 'Claude' };
+        if (gameMode === 'chatgpt') return { a: 'Ви', b: 'ChatGPT' };
         if (gameMode === 'online') return { a: 'Ви', b: 'Суперник' };
         return { a: 'Гравець 1', b: 'Гравець 2' };
     }
 
     function colorToPlayer(color) {
-        if (gameMode === 'pvc' || gameMode === 'claude') {
+        if (gameMode === 'pvc' || gameMode === 'claude' || gameMode === 'chatgpt') {
             return color === playerColor ? 'a' : 'b';
         }
         if (gameMode === 'online') {
@@ -599,10 +596,10 @@ document.addEventListener("DOMContentLoaded", () => {
         executeMove(pick.to);
     }
 
-    // ─── Claude AI ─────────────────────────────────────────────────────────
+    // ─── Server AI (Claude / ChatGPT) ──────────────────────────────────────
 
-    async function makeClaudeMove() {
-        if (isGameOver || claudeThinking) return;
+    async function makeServerAIMove(endpoint, label) {
+        if (isGameOver || aiThinking) return;
 
         let moves;
         if (mustJumpPiece) {
@@ -622,12 +619,12 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        claudeThinking = true;
+        aiThinking = true;
         const currentGen = gameGen;
-        statusElement.textContent = 'Claude думає...';
+        statusElement.textContent = `${label} думає...`;
 
         try {
-            const resp = await fetch('/api/ai-move', {
+            const resp = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ board, validMoves: moves, aiColor })
@@ -636,12 +633,12 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await resp.json();
             const pick = moves[data.moveIndex] || moves[0];
             selectedSquare = pick.from;
-            claudeThinking = false;
+            aiThinking = false;
             executeMove(pick.to);
         } catch (err) {
             if (gameGen !== currentGen) return;
-            console.error('Claude AI error:', err);
-            claudeThinking = false;
+            console.error(`${label} AI error:`, err);
+            aiThinking = false;
             const pick = moves[Math.floor(Math.random() * moves.length)];
             selectedSquare = pick.from;
             executeMove(pick.to);
@@ -664,13 +661,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     giveUpBtn.addEventListener('click', () => {
         if (isGameOver) return;
-        claudeThinking = false;
+        aiThinking = false;
         if (gameMode === 'pvp') {
             const loserLabel = currentPlayer === 'white' ? 'Білі' : 'Чорні';
             const winnerColor = currentPlayer === 'white' ? 'black' : 'white';
             const winnerLabel = winnerColor === 'white' ? 'Білі' : 'Чорні';
             endGame(`${loserLabel} здались! ${winnerLabel} перемогли!`, winnerColor);
-        } else if (gameMode === 'pvc' || gameMode === 'claude') {
+        } else if (gameMode === 'pvc' || gameMode === 'claude' || gameMode === 'chatgpt') {
             endGame(`Ви здались! Суперник переміг!`, aiColor);
         } else if (gameMode === 'online' && socket && myColor !== 'spectator') {
             const winnerColor = myColor === 'white' ? 'black' : 'white';

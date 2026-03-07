@@ -7,6 +7,11 @@
       "budget_tokens": 10000
     }
   },
+  "openai": {
+    "model": "o3",
+    "maxCompletionTokens": 16000,
+    "reasoningEffort": "medium"
+  },
   "server": {
     "port": 8080
   }
