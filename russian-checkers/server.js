@@ -1,13 +1,74 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const Anthropic = require('@anthropic-ai/sdk');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+const config = require('./config.json');
+const anthropic = new Anthropic();
+
+app.post('/api/ai-move', async (req, res) => {
+    const { board, validMoves, aiColor = 'black' } = req.body;
+    const aiPieces = aiColor === 'white' ? 'white pieces (w/W)' : 'dark pieces (b/B)';
+
+    const boardStr = board.map((row, r) =>
+        row.map((cell, c) => {
+            if (!cell) return (r + c) % 2 !== 0 ? '.' : ' ';
+            let ch = cell.color === 'white' ? 'w' : 'b';
+            if (cell.isKing) ch = ch.toUpperCase();
+            return ch;
+        }).join(' ')
+    ).map((row, i) => `${8 - i} | ${row}`).join('\n');
+
+    const movesStr = validMoves.map((m, i) =>
+        `${i}: (${m.from.r},${m.from.c}) -> (${m.to.r},${m.to.c})${m.to.capture ? ` captures (${m.to.capture.r},${m.to.capture.c})` : ''}`
+    ).join('\n');
+
+    try {
+        const params = {
+            model: config.claude.model,
+            max_tokens: config.claude.maxTokens,
+            messages: [{
+                role: 'user',
+                content: `You are playing Russian checkers (шашки) as the ${aiPieces}. The board (row,col from top-left, 0-indexed):
+    a b c d e f g h
+${boardStr}
+Legend: w=white man, W=white king, b=dark man, B=dark king, .=empty dark square
+
+Your valid moves:
+${movesStr}
+
+Pick the best move index (0-${validMoves.length - 1}). Respond with ONLY the number, nothing else.`
+            }]
+        };
+
+        if (config.claude.thinking) {
+            params.thinking = config.claude.thinking;
+        }
+
+        const response = await anthropic.messages.create(params);
+
+        const textBlock = response.content.find(b => b.type === 'text');
+        const text = textBlock ? textBlock.text.trim() : '0';
+        const moveIndex = parseInt(text, 10);
+        if (isNaN(moveIndex) || moveIndex < 0 || moveIndex >= validMoves.length) {
+            res.json({ moveIndex: 0 });
+        } else {
+            res.json({ moveIndex });
+        }
+    } catch (err) {
+        console.error('Claude API error:', err.message);
+        res.json({ moveIndex: Math.floor(Math.random() * validMoves.length) });
+    }
+});
 
 const rooms = {};
 
@@ -129,7 +190,7 @@ io.on('connection', (socket) => {
     });
 });
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || config.server.port;
 server.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
 });

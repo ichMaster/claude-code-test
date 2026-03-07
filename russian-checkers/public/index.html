@@ -1,24 +1,41 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Русские Шашки</title>
+    <title>Шашки</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>Русские Шашки</h1>
-        <div id="status">Ход: Белые</div>
+        <h1>Шашки</h1>
+        <div id="score" class="score">Гравець 1  0 : 0  Гравець 2</div>
+        <div class="timers">
+            <span id="timerWhite">Білі: 0:00</span>
+            <span id="timerBlack">Чорні: 0:00</span>
+        </div>
+        <div id="status">Хід: Білі</div>
         <div id="onlineInfo" style="display: none; color: #1abc9c; margin-bottom: 15px;"></div>
-        <div id="board" class="board"></div>
+        <div class="board-wrapper">
+            <div class="corner"></div>
+            <div class="letters-row" id="lettersTop"></div>
+            <div class="corner"></div>
+            <div class="numbers-col" id="numbersLeft"></div>
+            <div id="board" class="board"></div>
+            <div class="numbers-col" id="numbersRight"></div>
+            <div class="corner"></div>
+            <div class="letters-row" id="lettersBottom"></div>
+            <div class="corner"></div>
+        </div>
         <div class="controls">
             <select id="modeSelect">
-                <option value="pvp">Локально (Игрок vs Игрок)</option>
-                <option value="pvc">Игрок против Компьютера</option>
-                <option value="online">Онлайн (С другом)</option>
+                <option value="pvp">Локально (Гравець проти Гравця)</option>
+                <option value="pvc">Гравець проти Комп'ютера</option>
+                <option value="claude">Гравець проти Claude AI</option>
+                <option value="online">Онлайн (З другом)</option>
             </select>
-            <button id="restartBtn">Начать заново</button>
+            <button id="restartBtn">Почати заново</button>
+            <button id="giveUpBtn" class="btn-secondary">Здатися</button>
         </div>
     </div>
     <script src="/socket.io/socket.io.js"></script>
