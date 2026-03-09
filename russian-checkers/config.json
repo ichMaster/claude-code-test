@@ -8,9 +8,13 @@
     }
   },
   "openai": {
-    "model": "o3",
+    "model": "gpt-5.4",
     "maxCompletionTokens": 16000,
     "reasoningEffort": "medium"
+  },
+  "game": {
+    "computerDelayMs": 1500,
+    "autoPlayMaxGames": 3
   },
   "server": {
     "port": 8080

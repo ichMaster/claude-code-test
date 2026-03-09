@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const scoreElement = document.getElementById("score");
     const modeSelect = document.getElementById("modeSelect");
     const onlineInfo = document.getElementById("onlineInfo");
+    const aiStatusElement = document.getElementById("aiStatus");
 
     const ROWS = 8;
     const COLS = 8;
@@ -34,14 +35,16 @@ document.addEventListener("DOMContentLoaded", () => {
     let turnStartTime = null;
     let timerInterval = null;
 
-    function formatTime(sec) {
-        const m = Math.floor(sec / 60);
-        const s = sec % 60;
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    function formatTime(ms) {
+        const totalSec = Math.floor(ms / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        const tenths = Math.floor((ms % 1000) / 100);
+        return `${m}:${s < 10 ? '0' : ''}${s}.${tenths}`;
     }
 
     function updateTimerDisplay() {
-        const now = turnStartTime ? Math.floor((Date.now() - turnStartTime) / 1000) : 0;
+        const now = turnStartTime ? (Date.now() - turnStartTime) : 0;
         const wt = currentPlayer === 'white' ? timeWhite + now : timeWhite;
         const bt = currentPlayer === 'black' ? timeBlack + now : timeBlack;
         timerWhiteEl.textContent = `Білі: ${formatTime(wt)}`;
@@ -51,12 +54,12 @@ document.addEventListener("DOMContentLoaded", () => {
     function startTimer() {
         turnStartTime = Date.now();
         clearInterval(timerInterval);
-        timerInterval = setInterval(updateTimerDisplay, 1000);
+        timerInterval = setInterval(updateTimerDisplay, 100);
     }
 
     function switchTimer() {
         if (turnStartTime) {
-            const elapsed = Math.floor((Date.now() - turnStartTime) / 1000);
+            const elapsed = Date.now() - turnStartTime;
             if (currentPlayer === 'white') timeWhite += elapsed;
             else timeBlack += elapsed;
         }
@@ -65,7 +68,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function stopTimer() {
         if (turnStartTime) {
-            const elapsed = Math.floor((Date.now() - turnStartTime) / 1000);
+            const elapsed = Date.now() - turnStartTime;
             if (currentPlayer === 'white') timeWhite += elapsed;
             else timeBlack += elapsed;
         }
@@ -88,6 +91,116 @@ document.addEventListener("DOMContentLoaded", () => {
     let myColor = null;
     let roomName = null;
     let aiThinking = false;
+    let computerDelayMs = 1000; // default, overridden from config
+    let autoPlayMaxGames = 10; // default, overridden from config
+    let autoPlayGameCount = 0;
+
+    fetch('/api/config').then(r => r.json()).then(cfg => {
+        if (cfg.game?.computerDelayMs != null) computerDelayMs = cfg.game.computerDelayMs;
+        if (cfg.game?.autoPlayMaxGames != null) autoPlayMaxGames = cfg.game.autoPlayMaxGames;
+    }).catch(() => {});
+
+    // ─── Game Recorder ────────────────────────────────────────────────────────
+
+    const recorder = {
+        record: null,
+        moveCounter: 0,
+
+        startRecording(mode, players, initialBoard) {
+            this.moveCounter = 0;
+            this.record = {
+                id: 'g_' + Date.now() + '_' + Math.random().toString(16).slice(2, 6),
+                version: 1,
+                metadata: {
+                    mode,
+                    startedAt: new Date().toISOString(),
+                    endedAt: null,
+                    durationMs: 0,
+                    result: { winner: null, reason: null, winnerAgent: null, loserAgent: null },
+                    players,
+                    timerWhite: 0,
+                    timerBlack: 0,
+                    totalMoves: 0,
+                },
+                initialBoard: JSON.parse(JSON.stringify(initialBoard)),
+                moves: [],
+            };
+        },
+
+        recordMove(player, from, to, capture, promoted, isMultiJumpContinuation, boardAfter, availableMoves) {
+            if (!this.record) return;
+            this.moveCounter++;
+            this.record.moves.push({
+                moveNumber: this.moveCounter,
+                player,
+                from,
+                to,
+                capture: capture || null,
+                promoted,
+                isMultiJumpContinuation,
+                boardAfter: JSON.parse(JSON.stringify(boardAfter)),
+                availableMoves: JSON.parse(JSON.stringify(availableMoves)),
+                timestamp: new Date().toISOString(),
+            });
+        },
+
+        finishRecording(winner, reason) {
+            if (!this.record) return;
+            const meta = this.record.metadata;
+            meta.endedAt = new Date().toISOString();
+            meta.durationMs = new Date(meta.endedAt) - new Date(meta.startedAt);
+            meta.totalMoves = this.moveCounter;
+            meta.timerWhite = Math.round(timeWhite / 1000);
+            meta.timerBlack = Math.round(timeBlack / 1000);
+            meta.result.winner = winner;
+            meta.result.reason = reason;
+
+            const players = meta.players;
+            if (winner) {
+                meta.result.winnerAgent = players[winner]?.agent || 'unknown';
+                const loserColor = winner === 'white' ? 'black' : 'white';
+                meta.result.loserAgent = players[loserColor]?.agent || 'unknown';
+            }
+
+            // Send to server
+            fetch('/api/games', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.record),
+            }).catch(err => console.error('Failed to save game:', err));
+        },
+    };
+
+    function getPlayersMeta() {
+        const agentForColor = (color) => {
+            if (gameMode === 'pvp') return 'human';
+            if (gameMode === 'aiva') return color === 'white' ? 'claude' : 'chatgpt';
+            if (gameMode === 'rvc') return color === 'white' ? 'random' : 'claude';
+            if (gameMode === 'rvg') return color === 'white' ? 'random' : 'chatgpt';
+            if (gameMode === 'cvc') return 'random';
+            if (gameMode === 'pvc') return color === playerColor ? 'human' : 'random';
+            if (gameMode === 'claude') return color === playerColor ? 'human' : 'claude';
+            if (gameMode === 'chatgpt') return color === playerColor ? 'human' : 'chatgpt';
+            if (gameMode === 'online') return 'human';
+            return 'unknown';
+        };
+        const labelForColor = (color) => {
+            if (gameMode === 'pvp') return color === 'white' ? 'Гравець 1' : 'Гравець 2';
+            if (gameMode === 'aiva') return color === 'white' ? 'Claude' : 'ChatGPT';
+            if (gameMode === 'rvc') return color === 'white' ? "Комп'ютер" : 'Claude';
+            if (gameMode === 'rvg') return color === 'white' ? "Комп'ютер" : 'ChatGPT';
+            if (gameMode === 'cvc') return color === 'white' ? 'Білі' : 'Чорні';
+            if (gameMode === 'pvc') return color === playerColor ? 'Ви' : "Комп'ютер";
+            if (gameMode === 'claude') return color === playerColor ? 'Ви' : 'Claude';
+            if (gameMode === 'chatgpt') return color === playerColor ? 'Ви' : 'ChatGPT';
+            if (gameMode === 'online') return color === myColor ? 'Ви' : 'Суперник';
+            return color;
+        };
+        return {
+            white: { agent: agentForColor('white'), label: labelForColor('white') },
+            black: { agent: agentForColor('black'), label: labelForColor('black') },
+        };
+    }
 
     // ─── Board labels ────────────────────────────────────────────────────────
 
@@ -118,8 +231,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ─── Init ────────────────────────────────────────────────────────────────
 
-    function initGame() {
+    function isAutoPlayMode(mode) {
+        return mode === 'cvc' || mode === 'aiva' || mode === 'rvc' || mode === 'rvg';
+    }
+
+    async function initGame() {
+        try {
+            const cfg = await fetch('/api/config').then(r => r.json());
+            if (cfg.game?.computerDelayMs != null) computerDelayMs = cfg.game.computerDelayMs;
+            if (cfg.game?.autoPlayMaxGames != null) autoPlayMaxGames = cfg.game.autoPlayMaxGames;
+        } catch {}
+
+        const prevMode = gameMode;
         gameMode = modeSelect.value;
+        if (gameMode !== prevMode) autoPlayGameCount = 0;
+
+        if (isAutoPlayMode(gameMode) && autoPlayGameCount >= autoPlayMaxGames) {
+            return; // series limit reached
+        }
 
         if (gameMode !== 'online' && socket) {
             socket.disconnect();
@@ -145,6 +274,7 @@ document.addEventListener("DOMContentLoaded", () => {
         lastMoveTo = null;
 
         aiThinking = false;
+        aiStatusElement.textContent = '';
         gameGen++;
 
         if (gameMode === 'pvc' || gameMode === 'claude' || gameMode === 'chatgpt') {
@@ -156,6 +286,10 @@ document.addEventListener("DOMContentLoaded", () => {
         updateScore();
         resetTimers();
 
+        if (gameMode !== 'online') {
+            recorder.startRecording(gameMode, getPlayersMeta(), board);
+        }
+
         if (gameMode === 'online') {
             if (!socket) {
                 setupSocket();
@@ -166,10 +300,18 @@ document.addEventListener("DOMContentLoaded", () => {
             updateStatus();
             renderBoard();
             startTimer();
-            if (currentPlayer === aiColor) {
-                if (gameMode === 'pvc') setTimeout(makeAIMove, 500);
-                else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), 500);
-                else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), 500);
+            if (gameMode === 'aiva') {
+                scheduleAiVsAiMove();
+            } else if (gameMode === 'rvc') {
+                scheduleRvcMove();
+            } else if (gameMode === 'rvg') {
+                scheduleRvgMove();
+            } else if (gameMode === 'cvc') {
+                scheduleCvcMove();
+            } else if (currentPlayer === aiColor) {
+                if (gameMode === 'pvc') setTimeout(makeAIMove, computerDelayMs);
+                else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), computerDelayMs);
+                else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), computerDelayMs);
             }
         }
     }
@@ -237,7 +379,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 statusElement.textContent = `Хід суперника (${turnLabel})`;
             }
         } else {
-            statusElement.textContent = `Хід: ${turnLabel}`;
+            const prefix = isAutoPlayMode(gameMode) ? `[${autoPlayGameCount + 1}/${autoPlayMaxGames}] ` : '';
+            statusElement.textContent = `${prefix}Хід: ${turnLabel}`;
         }
     }
 
@@ -302,7 +445,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // ─── Input ───────────────────────────────────────────────────────────────
 
     function handleSquareClick(r, c) {
+        if (replayMode) return;
         if (isGameOver) return;
+        if (gameMode === 'cvc' || gameMode === 'aiva' || gameMode === 'rvc' || gameMode === 'rvg') return;
         if ((gameMode === 'pvc' || gameMode === 'claude' || gameMode === 'chatgpt') && currentPlayer !== playerColor) return;
         if (gameMode === 'online') {
             if (myColor === 'spectator') return;
@@ -410,6 +555,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function executeMove(move) {
+        // Snapshot available moves BEFORE board mutation (for recording)
+        const wasMultiJump = !!mustJumpPiece;
+        let preMoveAvailable;
+        if (mustJumpPiece) {
+            const p = board[mustJumpPiece.r][mustJumpPiece.c];
+            preMoveAvailable = p
+                ? getValidMoves(mustJumpPiece.r, mustJumpPiece.c, p).filter(m => m.capture).map(m => ({ from: { r: mustJumpPiece.r, c: mustJumpPiece.c }, to: m }))
+                : [];
+        } else {
+            preMoveAvailable = getAllValidMoves(currentPlayer);
+        }
+
         lastMoveFrom = { r: selectedSquare.r, c: selectedSquare.c };
         lastMoveTo = { r: move.r, c: move.c };
 
@@ -437,16 +594,25 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!justPromoted) {
                 const furtherCaptures = getValidMoves(move.r, move.c, piece).filter(m => m.capture);
                 if (furtherCaptures.length > 0) {
+                    recorder.recordMove(currentPlayer, lastMoveFrom, lastMoveTo, move.capture, false, wasMultiJump, board, preMoveAvailable);
                     mustJumpPiece = { r: move.r, c: move.c };
                     selectedSquare = { r: move.r, c: move.c };
                     validMoves = furtherCaptures;
                     updateStatus();
                     renderBoard();
                     emitMoveOnline();
-                    if (currentPlayer === aiColor && !isGameOver) {
-                        if (gameMode === 'pvc') setTimeout(makeAIMove, 500);
-                        else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), 500);
-                        else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), 500);
+                    if (gameMode === 'aiva' && !isGameOver) {
+                        scheduleAiVsAiMove();
+                    } else if (gameMode === 'rvc' && !isGameOver) {
+                        scheduleRvcMove();
+                    } else if (gameMode === 'rvg' && !isGameOver) {
+                        scheduleRvgMove();
+                    } else if (gameMode === 'cvc' && !isGameOver) {
+                        scheduleCvcMove();
+                    } else if (currentPlayer === aiColor && !isGameOver) {
+                        if (gameMode === 'pvc') setTimeout(makeAIMove, computerDelayMs);
+                        else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), computerDelayMs);
+                        else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), computerDelayMs);
                     }
                     return; // stay on this player's turn
                 }
@@ -456,6 +622,12 @@ document.addEventListener("DOMContentLoaded", () => {
             if (piece.color === 'white' && move.r === 0) piece.isKing = true;
             if (piece.color === 'black' && move.r === ROWS - 1) piece.isKing = true;
         }
+
+        // Record this move
+        const promoted = justPromoted ||
+            (piece.color === 'white' && move.r === 0 && piece.isKing) ||
+            (piece.color === 'black' && move.r === ROWS - 1 && piece.isKing);
+        recorder.recordMove(currentPlayer, lastMoveFrom, lastMoveTo, move.capture, promoted, wasMultiJump, board, preMoveAvailable);
 
         // End of turn
         mustJumpPiece = null;
@@ -469,10 +641,18 @@ document.addEventListener("DOMContentLoaded", () => {
         renderBoard();
         emitMoveOnline();
 
-        if (currentPlayer === aiColor && !isGameOver) {
-            if (gameMode === 'pvc') setTimeout(makeAIMove, 500);
-            else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), 500);
-            else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), 500);
+        if (gameMode === 'aiva' && !isGameOver) {
+            scheduleAiVsAiMove();
+        } else if (gameMode === 'rvc' && !isGameOver) {
+            scheduleRvcMove();
+        } else if (gameMode === 'rvg' && !isGameOver) {
+            scheduleRvgMove();
+        } else if (gameMode === 'cvc' && !isGameOver) {
+            scheduleCvcMove();
+        } else if (currentPlayer === aiColor && !isGameOver) {
+            if (gameMode === 'pvc') setTimeout(makeAIMove, computerDelayMs);
+            else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), computerDelayMs);
+            else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), computerDelayMs);
         }
     }
 
@@ -500,11 +680,16 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (getAllValidMoves(currentPlayer).length === 0) {
             const winnerColor = currentPlayer === 'white' ? 'black' : 'white';
             const winnerLabel = winnerColor === 'white' ? 'Білі' : 'Чорні';
+            endGameReason = 'no_moves';
             endGame(`${winnerLabel} перемогли! (суперник не має ходів)`, winnerColor);
         }
     }
 
     function getScoreLabels() {
+        if (gameMode === 'aiva') return { a: 'Claude', b: 'ChatGPT' };
+        if (gameMode === 'rvc') return { a: "Комп'ютер", b: 'Claude' };
+        if (gameMode === 'rvg') return { a: "Комп'ютер", b: 'ChatGPT' };
+        if (gameMode === 'cvc') return { a: 'Білі', b: 'Чорні' };
         if (gameMode === 'pvc') return { a: 'Ви', b: "Комп'ютер" };
         if (gameMode === 'claude') return { a: 'Ви', b: 'Claude' };
         if (gameMode === 'chatgpt') return { a: 'Ви', b: 'ChatGPT' };
@@ -523,6 +708,8 @@ document.addEventListener("DOMContentLoaded", () => {
         return color === 'white' ? 'a' : 'b';
     }
 
+    let endGameReason = 'no_pieces'; // set before calling endGame
+
     function endGame(message, winnerColor) {
         isGameOver = true;
         stopTimer();
@@ -531,12 +718,24 @@ document.addEventListener("DOMContentLoaded", () => {
             score[player]++;
             updateScore();
         }
+        recorder.finishRecording(winnerColor, endGameReason);
+        endGameReason = 'no_pieces'; // reset default
         statusElement.textContent = message;
         renderBoard();
-        setTimeout(() => {
-            alert(message);
-            initGame();
-        }, 100);
+
+        if (isAutoPlayMode(gameMode)) {
+            autoPlayGameCount++;
+            if (autoPlayGameCount >= autoPlayMaxGames) {
+                statusElement.textContent = `${message} (серію з ${autoPlayMaxGames} ігор завершено)`;
+                return;
+            }
+            setTimeout(() => initGame(), computerDelayMs);
+        } else {
+            setTimeout(() => {
+                alert(message);
+                initGame();
+            }, 100);
+        }
     }
 
     function updateScore() {
@@ -596,10 +795,41 @@ document.addEventListener("DOMContentLoaded", () => {
         executeMove(pick.to);
     }
 
+    // ─── CvC (Computer vs Computer) ────────────────────────────────────────
+
+    function makeCvcMove() {
+        if (isGameOver) return;
+
+        if (mustJumpPiece) {
+            const piece = board[mustJumpPiece.r][mustJumpPiece.c];
+            if (piece) {
+                const captures = getValidMoves(mustJumpPiece.r, mustJumpPiece.c, piece).filter(m => m.capture);
+                if (captures.length > 0) {
+                    selectedSquare = mustJumpPiece;
+                    executeMove(captures[Math.floor(Math.random() * captures.length)]);
+                    return;
+                }
+            }
+        }
+
+        const moves = getAllValidMoves(currentPlayer);
+        if (moves.length === 0) return;
+
+        const pick = moves[Math.floor(Math.random() * moves.length)];
+        selectedSquare = pick.from;
+        executeMove(pick.to);
+    }
+
+    function scheduleCvcMove() {
+        const gen = gameGen;
+        setTimeout(() => { if (gameGen === gen) makeCvcMove(); }, computerDelayMs);
+    }
+
     // ─── Server AI (Claude / ChatGPT) ──────────────────────────────────────
 
-    async function makeServerAIMove(endpoint, label) {
+    async function makeServerAIMove(endpoint, label, forColor) {
         if (isGameOver || aiThinking) return;
+        const moveColor = forColor || aiColor;
 
         let moves;
         if (mustJumpPiece) {
@@ -609,11 +839,11 @@ document.addEventListener("DOMContentLoaded", () => {
             if (captures.length === 0) return;
             moves = captures.map(m => ({ from: mustJumpPiece, to: m }));
         } else {
-            moves = getAllValidMoves(aiColor);
+            moves = getAllValidMoves(moveColor);
         }
 
         if (moves.length === 0) {
-            const winnerColor = aiColor === 'white' ? 'black' : 'white';
+            const winnerColor = moveColor === 'white' ? 'black' : 'white';
             const winnerLabel = winnerColor === 'white' ? 'Білі' : 'Чорні';
             endGame(`${winnerLabel} перемогли! (суперник не має ходів)`, winnerColor);
             return;
@@ -621,29 +851,248 @@ document.addEventListener("DOMContentLoaded", () => {
 
         aiThinking = true;
         const currentGen = gameGen;
-        statusElement.textContent = `${label} думає...`;
+        aiStatusElement.textContent = `${label} думає...`;
 
         try {
             const resp = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ board, validMoves: moves, aiColor })
+                body: JSON.stringify({ board, validMoves: moves, aiColor: moveColor })
             });
             if (gameGen !== currentGen) return;
             const data = await resp.json();
             const pick = moves[data.moveIndex] || moves[0];
             selectedSquare = pick.from;
             aiThinking = false;
+            aiStatusElement.textContent = '';
             executeMove(pick.to);
         } catch (err) {
             if (gameGen !== currentGen) return;
             console.error(`${label} AI error:`, err);
             aiThinking = false;
+            aiStatusElement.textContent = '';
             const pick = moves[Math.floor(Math.random() * moves.length)];
             selectedSquare = pick.from;
             executeMove(pick.to);
         }
     }
+
+    // ─── AI vs AI (Claude vs ChatGPT) ──────────────────────────────────────
+
+    function scheduleAiVsAiMove() {
+        const gen = gameGen;
+        const endpoint = currentPlayer === 'white' ? '/api/ai-move' : '/api/chatgpt-move';
+        const label = currentPlayer === 'white' ? 'Claude' : 'ChatGPT';
+        setTimeout(() => {
+            if (gameGen === gen) makeServerAIMove(endpoint, label, currentPlayer);
+        }, computerDelayMs);
+    }
+
+    // ─── Random vs Server AI (Computer vs Claude / Computer vs ChatGPT) ────
+
+    function makeRandomMove() {
+        if (isGameOver) return;
+
+        if (mustJumpPiece) {
+            const piece = board[mustJumpPiece.r][mustJumpPiece.c];
+            if (piece) {
+                const captures = getValidMoves(mustJumpPiece.r, mustJumpPiece.c, piece).filter(m => m.capture);
+                if (captures.length > 0) {
+                    selectedSquare = mustJumpPiece;
+                    executeMove(captures[Math.floor(Math.random() * captures.length)]);
+                    return;
+                }
+            }
+        }
+
+        const moves = getAllValidMoves(currentPlayer);
+        if (moves.length === 0) return;
+
+        const pick = moves[Math.floor(Math.random() * moves.length)];
+        selectedSquare = pick.from;
+        executeMove(pick.to);
+    }
+
+    function scheduleRvcMove() {
+        const gen = gameGen;
+        if (currentPlayer === 'white') {
+            // Random side
+            setTimeout(() => { if (gameGen === gen) makeRandomMove(); }, computerDelayMs);
+        } else {
+            // Claude side
+            setTimeout(() => {
+                if (gameGen === gen) makeServerAIMove('/api/ai-move', 'Claude', 'black');
+            }, computerDelayMs);
+        }
+    }
+
+    function scheduleRvgMove() {
+        const gen = gameGen;
+        if (currentPlayer === 'white') {
+            // Random side
+            setTimeout(() => { if (gameGen === gen) makeRandomMove(); }, computerDelayMs);
+        } else {
+            // ChatGPT side
+            setTimeout(() => {
+                if (gameGen === gen) makeServerAIMove('/api/chatgpt-move', 'ChatGPT', 'black');
+            }, computerDelayMs);
+        }
+    }
+
+    // ─── Replay ───────────────────────────────────────────────────────────────
+
+    let replayMode = false;
+    let replayData = null;
+    let replayIndex = 0; // 0 = initial board, 1..N = after move N
+    let replayAutoInterval = null;
+
+    const gameControls = document.getElementById("gameControls");
+    const replayControls = document.getElementById("replayControls");
+    const replayCounter = document.getElementById("replayCounter");
+    const replaySpeed = document.getElementById("replaySpeed");
+    const historyModal = document.getElementById("historyModal");
+    const historyList = document.getElementById("historyList");
+    const historyBtn = document.getElementById("historyBtn");
+
+    function enterReplayMode(game) {
+        replayMode = true;
+        replayData = game;
+        replayIndex = 0;
+        gameControls.style.display = 'none';
+        replayControls.style.display = 'flex';
+        historyModal.style.display = 'none';
+        scoreElement.style.display = 'none';
+        onlineInfo.style.display = 'none';
+        stopReplayAuto();
+        showReplayBoard();
+    }
+
+    function exitReplayMode() {
+        replayMode = false;
+        replayData = null;
+        stopReplayAuto();
+        gameControls.style.display = 'flex';
+        replayControls.style.display = 'none';
+        scoreElement.style.display = '';
+        initGame();
+    }
+
+    function showReplayBoard() {
+        if (!replayData) return;
+        const total = replayData.moves.length;
+        replayCounter.textContent = `${replayIndex} / ${total}`;
+
+        if (replayIndex === 0) {
+            board = JSON.parse(JSON.stringify(replayData.initialBoard));
+            lastMoveFrom = null;
+            lastMoveTo = null;
+            statusElement.textContent = `Перегляд: початок гри`;
+        } else {
+            const m = replayData.moves[replayIndex - 1];
+            board = JSON.parse(JSON.stringify(m.boardAfter));
+            lastMoveFrom = m.from;
+            lastMoveTo = m.to;
+            const playerLabel = m.player === 'white' ? 'Білі' : 'Чорні';
+            statusElement.textContent = `Перегляд: хід ${replayIndex} (${playerLabel})`;
+        }
+
+        selectedSquare = null;
+        validMoves = [];
+        mustJumpPiece = null;
+        isGameOver = replayIndex === total;
+        renderBoard();
+    }
+
+    function stopReplayAuto() {
+        clearInterval(replayAutoInterval);
+        replayAutoInterval = null;
+        const playBtn = document.getElementById("replayPlay");
+        if (playBtn) playBtn.textContent = '\u25B6';
+    }
+
+    document.getElementById("replayFirst").addEventListener('click', () => {
+        stopReplayAuto();
+        replayIndex = 0;
+        showReplayBoard();
+    });
+
+    document.getElementById("replayPrev").addEventListener('click', () => {
+        stopReplayAuto();
+        if (replayIndex > 0) { replayIndex--; showReplayBoard(); }
+    });
+
+    document.getElementById("replayNext").addEventListener('click', () => {
+        stopReplayAuto();
+        if (replayData && replayIndex < replayData.moves.length) { replayIndex++; showReplayBoard(); }
+    });
+
+    document.getElementById("replayLast").addEventListener('click', () => {
+        stopReplayAuto();
+        if (replayData) { replayIndex = replayData.moves.length; showReplayBoard(); }
+    });
+
+    document.getElementById("replayPlay").addEventListener('click', () => {
+        if (!replayData) return;
+        if (replayAutoInterval) {
+            stopReplayAuto();
+            return;
+        }
+        document.getElementById("replayPlay").textContent = '\u23F8';
+        const speed = parseInt(replaySpeed.value) || 1000;
+        replayAutoInterval = setInterval(() => {
+            if (replayIndex < replayData.moves.length) {
+                replayIndex++;
+                showReplayBoard();
+            } else {
+                stopReplayAuto();
+            }
+        }, speed);
+    });
+
+    document.getElementById("replayExit").addEventListener('click', exitReplayMode);
+
+    // History modal
+    historyBtn.addEventListener('click', async () => {
+        historyModal.style.display = 'flex';
+        historyList.innerHTML = '<p>Завантаження...</p>';
+        try {
+            const resp = await fetch('/api/games?limit=50');
+            const data = await resp.json();
+            if (data.games.length === 0) {
+                historyList.innerHTML = '<p>Немає записаних ігор</p>';
+                return;
+            }
+            historyList.innerHTML = '';
+            data.games.forEach(g => {
+                const row = document.createElement('div');
+                row.className = 'history-row';
+                const date = new Date(g.startedAt).toLocaleString('uk-UA');
+                const modeLabels = {
+                    pvp: 'PvP', pvc: 'PvC', claude: 'Claude', chatgpt: 'ChatGPT', aiva: 'AI vs AI', rvc: 'RvClaude', rvg: 'RvChatGPT', cvc: 'CvC', online: 'Online'
+                };
+                const resultLabel = g.result === 'white' ? 'Білі' : g.result === 'black' ? 'Чорні' : '—';
+                row.innerHTML = `
+                    <span class="history-date">${date}</span>
+                    <span class="history-mode">${modeLabels[g.mode] || g.mode}</span>
+                    <span class="history-result">Переміг: ${resultLabel}</span>
+                    <span class="history-moves">${g.totalMoves} ходів</span>
+                `;
+                row.addEventListener('click', async () => {
+                    const gameResp = await fetch(`/api/games/${g.id}`);
+                    const game = await gameResp.json();
+                    enterReplayMode(game);
+                });
+                historyList.appendChild(row);
+            });
+        } catch (err) {
+            historyList.innerHTML = '<p>Помилка завантаження</p>';
+            console.error(err);
+        }
+    });
+
+    document.getElementById("historyClose").addEventListener('click', () => {
+        historyModal.style.display = 'none';
+    });
 
     // ─── Controls ────────────────────────────────────────────────────────────
 
@@ -652,6 +1101,7 @@ document.addEventListener("DOMContentLoaded", () => {
     restartBtn.addEventListener('click', () => {
         score.a = 0;
         score.b = 0;
+        autoPlayGameCount = 0;
         if (gameMode === 'online' && socket) {
             socket.emit('restart');
         } else {
@@ -662,7 +1112,8 @@ document.addEventListener("DOMContentLoaded", () => {
     giveUpBtn.addEventListener('click', () => {
         if (isGameOver) return;
         aiThinking = false;
-        if (gameMode === 'pvp') {
+        endGameReason = 'resignation';
+        if (gameMode === 'pvp' || gameMode === 'cvc' || gameMode === 'aiva' || gameMode === 'rvc' || gameMode === 'rvg') {
             const loserLabel = currentPlayer === 'white' ? 'Білі' : 'Чорні';
             const winnerColor = currentPlayer === 'white' ? 'black' : 'white';
             const winnerLabel = winnerColor === 'white' ? 'Білі' : 'Чорні';

@@ -15,6 +15,7 @@
             <span id="timerBlack">Чорні: 0:00</span>
         </div>
         <div id="status">Хід: Білі</div>
+        <div id="aiStatus" class="ai-status"></div>
         <div id="onlineInfo" style="display: none; color: #1abc9c; margin-bottom: 15px;"></div>
         <div class="board-wrapper">
             <div class="corner"></div>
@@ -27,16 +28,46 @@
             <div class="letters-row" id="lettersBottom"></div>
             <div class="corner"></div>
         </div>
-        <div class="controls">
+        <div class="controls" id="gameControls">
             <select id="modeSelect">
                 <option value="pvp">Локально (Гравець проти Гравця)</option>
                 <option value="pvc">Гравець проти Комп'ютера</option>
                 <option value="claude">Гравець проти Claude AI</option>
                 <option value="chatgpt">Гравець проти ChatGPT</option>
+                <option value="aiva">Claude проти ChatGPT</option>
+                <option value="rvc">Комп'ютер проти Claude</option>
+                <option value="rvg">Комп'ютер проти ChatGPT</option>
+                <option value="cvc">Комп'ютер проти Комп'ютера</option>
                 <option value="online">Онлайн (З другом)</option>
             </select>
             <button id="restartBtn">Почати заново</button>
             <button id="giveUpBtn" class="btn-secondary">Здатися</button>
+            <button id="historyBtn" class="btn-history">Історія</button>
+        </div>
+        <div class="controls replay-controls" id="replayControls" style="display:none;">
+            <button id="replayFirst">|&lt;</button>
+            <button id="replayPrev">&lt;</button>
+            <button id="replayPlay">&#9654;</button>
+            <button id="replayNext">&gt;</button>
+            <button id="replayLast">&gt;|</button>
+            <span id="replayCounter" class="replay-counter">0 / 0</span>
+            <select id="replaySpeed">
+                <option value="2000">0.5x</option>
+                <option value="1000" selected>1x</option>
+                <option value="500">2x</option>
+                <option value="250">4x</option>
+            </select>
+            <button id="replayExit" class="btn-secondary">Назад</button>
+        </div>
+        <!-- Game history modal -->
+        <div id="historyModal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Історія ігор</h2>
+                    <button id="historyClose" class="modal-close">&times;</button>
+                </div>
+                <div id="historyList" class="history-list"></div>
+            </div>
         </div>
     </div>
     <script src="/socket.io/socket.io.js"></script>
