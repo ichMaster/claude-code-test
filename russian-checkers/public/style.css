@@ -327,6 +327,12 @@ select:hover {
     background-color: #2c3e50;
 }
 
+.history-row.selected {
+    background-color: #1a3a4a;
+    border-left: 3px solid #1abc9c;
+    padding-left: 9px;
+}
+
 .history-date {
     color: #bdc3c7;
     font-size: 13px;

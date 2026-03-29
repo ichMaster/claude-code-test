@@ -1000,6 +1000,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     </div>
                 `;
                 row.addEventListener('click', async () => {
+                    listEl.querySelectorAll('.history-row.selected').forEach(el => el.classList.remove('selected'));
+                    row.classList.add('selected');
                     const gameResp = await fetch(`/api/games/${g.id}`);
                     const game = await gameResp.json();
                     enterReplayMode(game);
