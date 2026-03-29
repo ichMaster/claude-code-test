@@ -30,7 +30,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          show_full_output: true
           prompt: |
             After implementing the requested changes, always create a pull request automatically using the gh CLI.
             Do not just provide a "Create PR" link — run `gh pr create` to open the PR yourself.
