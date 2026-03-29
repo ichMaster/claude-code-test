@@ -1,0 +1,32 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check for syntax errors
+        run: |
+          find russian-checkers -name "*.js" -not -path "*/node_modules/*" | while read file; do
+            node --check "$file" || exit 1
+          done
+
+      - name: Check for .env or credential files
+        run: |
+          if git ls-files --cached --others --exclude-standard | grep -E '\.env$|credentials|\.pem$|\.key$'; then
+            echo "::error::Potential secret files detected in the repository"
+            exit 1
+          fi
