@@ -1064,6 +1064,10 @@ document.addEventListener("DOMContentLoaded", () => {
         replayMode = false;
         replayData = null;
         stopReplayAuto();
+        const historyList = document.getElementById('historyList');
+        if (historyList) {
+            historyList.querySelectorAll('.history-row.selected').forEach(el => el.classList.remove('selected'));
+        }
         gameControls.style.display = 'flex';
         replayControls.style.display = 'none';
         scoreElement.style.display = '';
