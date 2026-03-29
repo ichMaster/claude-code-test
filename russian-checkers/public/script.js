@@ -990,10 +990,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 };
                 const resultLabel = g.result === 'white' ? 'Білі' : g.result === 'black' ? 'Чорні' : '—';
                 row.innerHTML = `
-                    <span class="history-date">${date}</span>
-                    <span class="history-mode">${modeLabels[g.mode] || g.mode}</span>
-                    <span class="history-result">Переміг: ${resultLabel}</span>
-                    <span class="history-moves">${g.totalMoves} ходів</span>
+                    <div class="history-line">
+                        <span class="history-mode">${modeLabels[g.mode] || g.mode}</span>
+                        <span class="history-result">Переміг: ${resultLabel}</span>
+                    </div>
+                    <div class="history-line">
+                        <span class="history-date">${date}</span>
+                        <span class="history-moves">${g.totalMoves} ходів</span>
+                    </div>
                 `;
                 row.addEventListener('click', async () => {
                     const gameResp = await fetch(`/api/games/${g.id}`);
