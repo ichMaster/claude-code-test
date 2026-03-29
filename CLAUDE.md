@@ -36,3 +36,7 @@ All source code lives under `russian-checkers/`. There is no build step — plai
 ## Environment
 
 Requires `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` environment variables (loaded via dotenv from `.env`). Deployment config in `render.yaml` (Render) with instructions for Railway in README.
+
+## GitHub Actions Workflow Rules
+
+When implementing changes from a GitHub issue, always create a pull request automatically by running `gh pr create` at the end. Do not just provide a "Create PR" link.
