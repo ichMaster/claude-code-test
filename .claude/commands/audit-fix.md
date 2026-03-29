@@ -1,0 +1,1 @@
+Run `npm audit` in the `russian-checkers` directory to check for vulnerabilities. Then run `npm audit fix` to automatically resolve them. Report what was found and what was fixed. If any vulnerabilities remain after the fix, explain what they are and suggest manual steps to resolve them.

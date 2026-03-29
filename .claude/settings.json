@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh run:*)"
+      "Bash(gh run:*)",
+      "Bash(gh auth:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm audit:*)"
+    ],
+    "additionalDirectories": [
+      "/Users/Vitalii_Bondarenko2/development/claude-code-test/.claude"
     ]
   }
 }
