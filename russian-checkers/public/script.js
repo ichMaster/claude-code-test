@@ -273,6 +273,7 @@ document.addEventListener("DOMContentLoaded", () => {
         lastMoveFrom = null;
         lastMoveTo = null;
 
+        savedGameState = null;
         aiThinking = false;
         aiStatusElement.textContent = '';
         gameGen++;
@@ -285,6 +286,7 @@ document.addEventListener("DOMContentLoaded", () => {
         updateLabels();
         updateScore();
         resetTimers();
+        updateHistoryPanelVisibility();
 
         if (gameMode !== 'online') {
             recorder.startRecording(gameMode, getPlayersMeta(), board);
@@ -722,16 +724,23 @@ document.addEventListener("DOMContentLoaded", () => {
         endGameReason = 'no_pieces'; // reset default
         statusElement.textContent = message;
         renderBoard();
+        updateHistoryPanelVisibility();
+        setTimeout(() => loadHistorySidebar(), 600);
 
+        const genAtEnd = gameGen;
         if (isAutoPlayMode(gameMode)) {
             autoPlayGameCount++;
             if (autoPlayGameCount >= autoPlayMaxGames) {
                 statusElement.textContent = `${message} (серію з ${autoPlayMaxGames} ігор завершено)`;
                 return;
             }
-            setTimeout(() => initGame(), computerDelayMs);
+            setTimeout(() => {
+                if (replayMode || gameGen !== genAtEnd) return;
+                initGame();
+            }, computerDelayMs);
         } else {
             setTimeout(() => {
+                if (replayMode || gameGen !== genAtEnd) return;
                 alert(message);
                 initGame();
             }, 100);
@@ -945,26 +954,104 @@ document.addEventListener("DOMContentLoaded", () => {
     let replayData = null;
     let replayIndex = 0; // 0 = initial board, 1..N = after move N
     let replayAutoInterval = null;
+    let savedGameState = null; // live game state saved when entering replay mid-game
 
     const gameControls = document.getElementById("gameControls");
     const replayControls = document.getElementById("replayControls");
     const replayCounter = document.getElementById("replayCounter");
     const replaySpeed = document.getElementById("replaySpeed");
-    const historyModal = document.getElementById("historyModal");
-    const historyList = document.getElementById("historyList");
-    const historyBtn = document.getElementById("historyBtn");
+
+    function updateHistoryPanelVisibility() {
+        const panel = document.getElementById('historyPanel');
+        if (!panel) return;
+        const hide = gameMode === 'online' && !isGameOver;
+        panel.style.display = hide ? 'none' : 'flex';
+    }
+
+    async function loadHistorySidebar() {
+        const listEl = document.getElementById('historyList');
+        if (!listEl) return;
+        listEl.innerHTML = '<p style="padding:8px;color:#95a5a6;font-size:13px">Завантаження...</p>';
+        try {
+            const resp = await fetch('/api/games?limit=50');
+            const data = await resp.json();
+            if (data.games.length === 0) {
+                listEl.innerHTML = '<p style="padding:8px;color:#95a5a6;font-size:13px">Немає записаних ігор</p>';
+                return;
+            }
+            listEl.innerHTML = '';
+            data.games.forEach(g => {
+                const row = document.createElement('div');
+                row.className = 'history-row';
+                const date = new Date(g.startedAt).toLocaleString('uk-UA');
+                const modeLabels = {
+                    pvp: 'PvP', pvc: 'PvC', claude: 'Claude', chatgpt: 'ChatGPT',
+                    aiva: 'AI vs AI', rvc: 'RvClaude', rvg: 'RvChatGPT', cvc: 'CvC', online: 'Online'
+                };
+                const resultLabel = g.result === 'white' ? 'Білі' : g.result === 'black' ? 'Чорні' : '—';
+                row.innerHTML = `
+                    <span class="history-date">${date}</span>
+                    <span class="history-mode">${modeLabels[g.mode] || g.mode}</span>
+                    <span class="history-result">Переміг: ${resultLabel}</span>
+                    <span class="history-moves">${g.totalMoves} ходів</span>
+                `;
+                row.addEventListener('click', async () => {
+                    const gameResp = await fetch(`/api/games/${g.id}`);
+                    const game = await gameResp.json();
+                    enterReplayMode(game);
+                });
+                listEl.appendChild(row);
+            });
+        } catch (err) {
+            listEl.innerHTML = '<p style="padding:8px;color:#95a5a6;font-size:13px">Помилка завантаження</p>';
+            console.error(err);
+        }
+    }
 
     function enterReplayMode(game) {
+        // Save live game state if not already replaying
+        if (!replayMode) {
+            savedGameState = {
+                board: JSON.parse(JSON.stringify(board)),
+                currentPlayer,
+                isGameOver,
+                mustJumpPiece: mustJumpPiece ? { ...mustJumpPiece } : null,
+                selectedSquare: selectedSquare ? { ...selectedSquare } : null,
+                validMoves: validMoves.slice(),
+                lastMoveFrom: lastMoveFrom ? { ...lastMoveFrom } : null,
+                lastMoveTo: lastMoveTo ? { ...lastMoveTo } : null,
+                timeWhite,
+                timeBlack,
+                aiStatusText: aiStatusElement.textContent,
+            };
+            gameGen++; // cancel in-flight AI moves / pending timeouts
+            stopTimer();
+        }
         replayMode = true;
         replayData = game;
         replayIndex = 0;
         gameControls.style.display = 'none';
         replayControls.style.display = 'flex';
-        historyModal.style.display = 'none';
         scoreElement.style.display = 'none';
         onlineInfo.style.display = 'none';
         stopReplayAuto();
         showReplayBoard();
+    }
+
+    function resumeAiIfNeeded() {
+        if (gameMode === 'aiva') {
+            scheduleAiVsAiMove();
+        } else if (gameMode === 'rvc') {
+            scheduleRvcMove();
+        } else if (gameMode === 'rvg') {
+            scheduleRvgMove();
+        } else if (gameMode === 'cvc') {
+            scheduleCvcMove();
+        } else if (currentPlayer === aiColor) {
+            if (gameMode === 'pvc') setTimeout(makeAIMove, computerDelayMs);
+            else if (gameMode === 'claude') setTimeout(() => makeServerAIMove('/api/ai-move', 'Claude'), computerDelayMs);
+            else if (gameMode === 'chatgpt') setTimeout(() => makeServerAIMove('/api/chatgpt-move', 'ChatGPT'), computerDelayMs);
+        }
     }
 
     function exitReplayMode() {
@@ -974,7 +1061,35 @@ document.addEventListener("DOMContentLoaded", () => {
         gameControls.style.display = 'flex';
         replayControls.style.display = 'none';
         scoreElement.style.display = '';
-        initGame();
+
+        if (savedGameState) {
+            // Restore live game state
+            board = savedGameState.board;
+            currentPlayer = savedGameState.currentPlayer;
+            isGameOver = savedGameState.isGameOver;
+            mustJumpPiece = savedGameState.mustJumpPiece;
+            selectedSquare = savedGameState.selectedSquare;
+            validMoves = savedGameState.validMoves;
+            lastMoveFrom = savedGameState.lastMoveFrom;
+            lastMoveTo = savedGameState.lastMoveTo;
+            timeWhite = savedGameState.timeWhite;
+            timeBlack = savedGameState.timeBlack;
+            aiStatusElement.textContent = savedGameState.aiStatusText;
+            savedGameState = null;
+
+            gameGen++; // fresh generation for resumed game
+            if (gameMode === 'online' && !isGameOver) onlineInfo.style.display = 'block';
+            updateHistoryPanelVisibility();
+            updateStatus();
+            renderBoard();
+
+            if (!isGameOver) {
+                startTimer();
+                resumeAiIfNeeded();
+            }
+        } else {
+            initGame();
+        }
     }
 
     function showReplayBoard() {
@@ -1051,49 +1166,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("replayExit").addEventListener('click', exitReplayMode);
 
-    // History modal
-    historyBtn.addEventListener('click', async () => {
-        historyModal.style.display = 'flex';
-        historyList.innerHTML = '<p>Завантаження...</p>';
-        try {
-            const resp = await fetch('/api/games?limit=50');
-            const data = await resp.json();
-            if (data.games.length === 0) {
-                historyList.innerHTML = '<p>Немає записаних ігор</p>';
-                return;
-            }
-            historyList.innerHTML = '';
-            data.games.forEach(g => {
-                const row = document.createElement('div');
-                row.className = 'history-row';
-                const date = new Date(g.startedAt).toLocaleString('uk-UA');
-                const modeLabels = {
-                    pvp: 'PvP', pvc: 'PvC', claude: 'Claude', chatgpt: 'ChatGPT', aiva: 'AI vs AI', rvc: 'RvClaude', rvg: 'RvChatGPT', cvc: 'CvC', online: 'Online'
-                };
-                const resultLabel = g.result === 'white' ? 'Білі' : g.result === 'black' ? 'Чорні' : '—';
-                row.innerHTML = `
-                    <span class="history-date">${date}</span>
-                    <span class="history-mode">${modeLabels[g.mode] || g.mode}</span>
-                    <span class="history-result">Переміг: ${resultLabel}</span>
-                    <span class="history-moves">${g.totalMoves} ходів</span>
-                `;
-                row.addEventListener('click', async () => {
-                    const gameResp = await fetch(`/api/games/${g.id}`);
-                    const game = await gameResp.json();
-                    enterReplayMode(game);
-                });
-                historyList.appendChild(row);
-            });
-        } catch (err) {
-            historyList.innerHTML = '<p>Помилка завантаження</p>';
-            console.error(err);
-        }
-    });
-
-    document.getElementById("historyClose").addEventListener('click', () => {
-        historyModal.style.display = 'none';
-    });
-
     // ─── Controls ────────────────────────────────────────────────────────────
 
     modeSelect.addEventListener('change', initGame);
@@ -1129,4 +1201,5 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     initGame();
+    loadHistorySidebar();
 });
