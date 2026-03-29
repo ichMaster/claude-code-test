@@ -60,8 +60,14 @@ body {
 
 .history-panel .history-row {
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     padding: 8px 10px;
+}
+
+.history-panel .history-line {
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
 .history-panel .history-date {
@@ -76,6 +82,7 @@ body {
 
 .history-panel .history-result {
     font-size: 12px;
+    flex: 1;
 }
 
 .history-panel .history-moves {
