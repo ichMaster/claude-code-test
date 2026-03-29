@@ -5,7 +5,8 @@
       "Bash(gh auth:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(npm audit:*)"
+      "Bash(npm audit:*)",
+      "Bash(git rm:*)"
     ],
     "additionalDirectories": [
       "/Users/Vitalii_Bondarenko2/development/claude-code-test/.claude"
